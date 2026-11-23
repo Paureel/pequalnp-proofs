@@ -15,37 +15,46 @@ CASE_NORMALS = {
 }
 
 
+CASE_COORDINATES = {
+    'cross-three-row-one-column': (0, 1, 2, 4),
+    'cross-two-row-two-column': (0, 1, 4, 5),
+}
+
+
 def rank(vectors):
     return CELLS - len(nullspace(vectors, CELLS))
 
 
-def seed_and_quotient(normal):
+def seed_and_quotient(case):
     cross = cross_basis()
-    pivot = next(i for i, value in enumerate(normal) if value)
-    seed = [[x - normal[i] * y for x, y in zip(row, cross[pivot])]
-            for i, row in enumerate(cross) if i != pivot]
+    if case in CASE_COORDINATES:
+        seed = [cross[i] for i in CASE_COORDINATES[case]]
+    else:
+        normal = CASE_NORMALS[case]
+        pivot = next(i for i, value in enumerate(normal) if value)
+        seed = [[x - normal[i] * y for x, y in zip(row, cross[pivot])]
+                for i, row in enumerate(cross) if i != pivot]
     current = seed.copy()
     quotient = []
     for vector in nullspace(extension_constraints(seed), CELLS):
         if rank([*current, vector]) > len(current):
             current.append(vector)
             quotient.append(vector)
-    assert rank(seed) == 5
+    assert rank(seed) == len(seed)
     assert not any(evaluate_coefficients(seed))
     return seed, quotient
 
 
-def chart_equations(seed_count, dimension, coefficients, first, second):
-    """Return sparse equations in the free entries of the two identity-normalized vectors."""
-    pivots = (first, second)
-    variables = [(j, col) for col in range(2) for j in range(dimension) if j not in pivots]
+def chart_equations(seed_count, dimension, coefficients, pivots):
+    """Return sparse equations in the free entries of the identity-normalized vectors."""
+    variables = [(j, col) for col in range(len(pivots)) for j in range(dimension) if j not in pivots]
     slots = {coordinate: i for i, coordinate in enumerate(variables)}
     entries = defaultdict(lambda: defaultdict(Fraction))
     for order_coefficients in coefficients:
         for monomial, value in order_coefficients.items():
             seed_vars = tuple(i for i in monomial if i < seed_count)
             quotient_vars = tuple(i - seed_count for i in monomial if i >= seed_count)
-            for assignments in product(range(2), repeat=len(quotient_vars)):
+            for assignments in product(range(len(pivots)), repeat=len(quotient_vars)):
                 exponents = [0] * len(variables)
                 for j, col in zip(quotient_vars, assignments):
                     if j in pivots:
@@ -63,7 +72,7 @@ def chart_equations(seed_count, dimension, coefficients, first, second):
 def new_vectors(quotient, pivots, variables, values):
     all_values = dict(zip(variables, values))
     vectors = []
-    for col in range(2):
+    for col in range(len(pivots)):
         coefficients = [all_values.get((j, col), int(j == pivots[col])) for j in range(len(quotient))]
         vectors.append([sum(x * a for x, a in zip(coefficients, cell)) for cell in zip(*quotient)])
     return vectors
@@ -124,7 +133,10 @@ def solve_chart(seed, quotient, pivots, variables, entries, seconds):
         print('proper ideal over characteristic zero', flush=True)
         if basis.is_zero_dimensional:
             lex = basis.fglm('lex')
-            solutions = solve_poly_system(list(lex), *symbols) or []
+            try:
+                solutions = solve_poly_system(list(lex), *symbols) or []
+            except NotImplementedError:
+                solutions = []
             for solution in solutions[:1]:
                 witness = seed + new_vectors(quotient, pivots, variables, solution)
                 for vector in witness:
@@ -141,20 +153,24 @@ def solve_chart(seed, quotient, pivots, variables, entries, seconds):
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument('case', choices=CASE_NORMALS)
+    parser.add_argument('case', choices=tuple(CASE_NORMALS) + tuple(CASE_COORDINATES))
     parser.add_argument('--validate-only', action='store_true')
     parser.add_argument('--seconds-per-chart', type=int, default=45)
+    parser.add_argument('--batch', type=int, default=0)
+    parser.add_argument('--batches', type=int, default=1)
     args = parser.parse_args()
-    seed, quotient = seed_and_quotient(CASE_NORMALS[args.case])
+    seed, quotient = seed_and_quotient(args.case)
     coefficients = list(evaluate_coefficients(seed + quotient))
     print(f'{args.case}: seed dimension {len(seed)}, extension quotient dimension {len(quotient)}', flush=True)
     results = defaultdict(int)
-    for first, second in combinations(range(len(quotient)), 2):
-        variables, equations = chart_equations(len(seed), len(quotient), coefficients, first, second)
-        verify_expansion(seed, quotient, (first, second), variables, equations)
+    for number, pivots in enumerate(combinations(range(len(quotient)), 7 - len(seed))):
+        if number % args.batches != args.batch:
+            continue
+        variables, equations = chart_equations(len(seed), len(quotient), coefficients, pivots)
+        verify_expansion(seed, quotient, pivots, variables, equations)
         if not args.validate_only:
-            print(f'Chart {(first, second)}: {sum(bool(p) for p in equations.values())} equations', flush=True)
-            result = solve_chart(seed, quotient, (first, second), variables, equations, args.seconds_per_chart)
+            print(f'Chart {pivots}: {sum(bool(p) for p in equations.values())} equations', flush=True)
+            result = solve_chart(seed, quotient, pivots, variables, equations, args.seconds_per_chart)
             results[result] += 1
     print('Chart results:', dict(results), flush=True)
 

@@ -1,0 +1,46 @@
+name: Isolated four-direction permanent search
+
+on:
+  push:
+    branches: [codex/permanent-search]
+    paths:
+      - .github/workflows/permanent-four-directions.yml
+      - tools/permanent-search/extend.py
+      - tools/permanent-search/grassmann.py
+
+permissions: {}
+
+concurrency:
+  group: isolated-four-direction-permanent-search
+  cancel-in-progress: true
+
+jobs:
+  search:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        start: [cross-three-row-one-column, cross-two-row-two-column]
+        batch: [0, 1, 2]
+    env:
+      SEARCH_CASE: ${{ matrix.start }}
+      SEARCH_BATCH: ${{ matrix.batch }}
+    steps:
+      - name: Fetch public search code without credentials
+        run: |
+          set -euo pipefail
+          git init -q .
+          git fetch --depth=1 https://github.com/Paureel/pequalnp-proofs.git "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Install pinned SymPy in the VM
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/permanent-venv"
+          "$RUNNER_TEMP/permanent-venv/bin/pip" install --disable-pip-version-check \
+            --only-binary=:all: sympy==1.14.0 mpmath==1.3.0
+      - name: Check this batch of charts over the rationals
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/permanent-venv/bin/python" -u tools/permanent-search/grassmann.py \
+            "$SEARCH_CASE" --batch "$SEARCH_BATCH" --batches 3 --seconds-per-chart 30
