@@ -1,0 +1,40 @@
+name: Isolated permanent search
+
+on:
+  push:
+    branches: [codex/permanent-search]
+
+permissions: {}
+
+concurrency:
+  group: isolated-permanent-search
+  cancel-in-progress: true
+
+jobs:
+  search:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [column-two-entries, column-three-entries, row-one-pair, row-two-pairs]
+    env:
+      SEARCH_CASE: ${{ matrix.seed }}
+    steps:
+      - name: Fetch public search code without credentials
+        run: |
+          set -euo pipefail
+          git init -q .
+          git fetch --depth=1 https://github.com/Paureel/pequalnp-proofs.git "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Install pinned SymPy in the VM
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/permanent-venv"
+          "$RUNNER_TEMP/permanent-venv/bin/pip" install --disable-pip-version-check \
+            --only-binary=:all: sympy==1.14.0 mpmath==1.3.0
+      - name: Check all charts for this seed
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/permanent-venv/bin/python" -u tools/permanent-search/grassmann.py \
+            "$SEARCH_CASE" --seconds-per-chart 55
