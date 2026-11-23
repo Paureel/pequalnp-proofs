@@ -59,13 +59,17 @@ jobs:
           file=${files[0]}
           [[ "$file" =~ ^lean/PEqualNP/Outside/L_[a-z0-9_]+\.lean$ ]]
           [ -f "$file" ] && [ ! -L "$file" ]
-          mkdir -p "$RUNNER_TEMP/gap"
-          curl -q --proto '=https' -fsS --max-time 20 --max-filesize 5000000 \
-            https://data.pequalnp.com/data/desk/gaps.json -o "$RUNNER_TEMP/gaps.json"
-          node .github/scripts/outside-guard.mjs gap-of-file "$RUNNER_TEMP/gaps.json" "$file" "$RUNNER_TEMP/gap"
-          node .github/scripts/outside-guard.mjs imports "$file" "$RUNNER_TEMP/gap/imports.json" "$file"
           module=${file#lean/}
           module=${module%.lean}
           module=${module//\//.}
+          if grep -Fq "theorem $module " "$file"; then
+            mkdir -p "$RUNNER_TEMP/gap"
+            curl -q --proto '=https' -fsS --max-time 20 --max-filesize 5000000 \
+              https://data.pequalnp.com/data/desk/gaps.json -o "$RUNNER_TEMP/gaps.json"
+            node .github/scripts/outside-guard.mjs gap-of-file "$RUNNER_TEMP/gaps.json" "$file" "$RUNNER_TEMP/gap"
+            node .github/scripts/outside-guard.mjs imports "$file" "$RUNNER_TEMP/gap/imports.json" "$file"
+          else
+            echo "Compiling partial mathematics on the build branch."
+          fi
           cd lean
           lake build "+$module"
