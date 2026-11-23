@@ -1,0 +1,45 @@
+name: Isolated permanent search with Singular
+
+on:
+  push:
+    branches: [codex/permanent-search]
+    paths:
+      - .github/workflows/permanent-singular.yml
+      - tools/permanent-search/extend.py
+      - tools/permanent-search/fast_exact.py
+
+permissions: {}
+
+concurrency:
+  group: isolated-singular-permanent-search
+  cancel-in-progress: true
+
+jobs:
+  search:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        start: [cross-three-row-one-column, cross-two-row-two-column]
+        batch: [0, 1, 2]
+    env:
+      SEARCH_CASE: ${{ matrix.start }}
+      SEARCH_BATCH: ${{ matrix.batch }}
+    steps:
+      - name: Fetch public search code without credentials
+        run: |
+          set -euo pipefail
+          git init -q .
+          git fetch --depth=1 https://github.com/Paureel/pequalnp-proofs.git "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Install Singular in the VM
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends singular
+      - name: Check all charts in this batch
+        run: |
+          set -euo pipefail
+          python3 -u tools/permanent-search/fast_exact.py "$SEARCH_CASE" \
+            --batch "$SEARCH_BATCH" --batches 3 --seconds-per-system 30
