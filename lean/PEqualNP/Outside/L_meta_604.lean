@@ -215,8 +215,13 @@ private theorem lowerBoundThree (n s : ℕ) (g : (Fin n → Bool) → Bool)
   obtain ⟨C, hok, hsize, heval⟩ := PermInputs.relabel_size ρ _ t hbd
   have hlen : C.size ≤ s := by omega
   have hval (y : Fin n → Bool) : C.eval (List.ofFn y) = xor b (g y) := by
-    rw [heval, hlast]
-    simp [Function.comp_def, hρ]
+    rw [heval]
+    change f (Function.update (y ∘ ρ) (Fin.last n) b) = xor b (g y)
+    rw [hlast]
+    have hy : (fun i : Fin n => (y ∘ ρ) i.castSucc) = y := by
+      funext i
+      exact congrArg y (hρ i)
+    rw [hy]
   cases b
   · exact Or.inl ⟨C, hok, hlen, fun y => by simpa using hval y⟩
   · exact Or.inr ⟨C, hok, hlen, fun y => by simpa using hval y⟩
