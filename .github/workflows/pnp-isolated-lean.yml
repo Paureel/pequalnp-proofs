@@ -1,0 +1,71 @@
+name: Isolated Lean build
+
+on:
+  push:
+    branches: [codex/isolated-lean]
+
+permissions: {}
+
+concurrency:
+  group: isolated-lean
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BASE_COMMIT: 7ac1ed657531b10612312aa57586ffb5b1ec17c4
+      LAKE_ARTIFACT_CACHE: 'false'
+    steps:
+      - name: Fetch public source anonymously
+        run: |
+          set -euo pipefail
+          git init -q .
+          repository=https://github.com/Paureel/pequalnp-proofs.git
+          git fetch --depth=1 "$repository" "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          git fetch --depth=1 "$repository" "$BASE_COMMIT"
+
+      - name: Install checksum-verified elan and pinned Lean
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -q --proto '=https' --proto-redir '=https' -fsSL --max-time 120 \
+            https://github.com/leanprover/elan/releases/download/v4.4.0/elan-x86_64-unknown-linux-gnu.tar.gz \
+            -o elan.tar.gz
+          echo '0e8250aa2be86c7af929ade68db617af9edc8b9ccf6eaf5ece228250d0d032e2  elan.tar.gz' | sha256sum -c
+          tar -xzf elan.tar.gz elan-init
+          ./elan-init -y --no-modify-path --default-toolchain none
+          printf '%s\n' "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          cd "$GITHUB_WORKSPACE/lean"
+          "$HOME/.elan/bin/lean" --version
+
+      - name: Fetch pinned Mathlib artifacts
+        working-directory: lean
+        run: lake exe cache get
+
+      - name: Compile the candidate or run a smoke test
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git diff --name-only "$BASE_COMMIT" HEAD -- lean/PEqualNP/Outside/)
+          if [ "${#files[@]}" -eq 0 ]; then
+            printf 'import Mathlib\nexample : 1 + 1 = 2 := by norm_num\n' > "$RUNNER_TEMP/Smoke.lean"
+            cd lean
+            lake env lean "$RUNNER_TEMP/Smoke.lean"
+            exit
+          fi
+          [ "${#files[@]}" -eq 1 ]
+          file=${files[0]}
+          [[ "$file" =~ ^lean/PEqualNP/Outside/L_[a-z0-9_]+\.lean$ ]]
+          [ -f "$file" ] && [ ! -L "$file" ]
+          mkdir -p "$RUNNER_TEMP/gap"
+          curl -q --proto '=https' -fsS --max-time 20 --max-filesize 5000000 \
+            https://data.pequalnp.com/data/desk/gaps.json -o "$RUNNER_TEMP/gaps.json"
+          node .github/scripts/outside-guard.mjs gap-of-file "$RUNNER_TEMP/gaps.json" "$file" "$RUNNER_TEMP/gap"
+          node .github/scripts/outside-guard.mjs imports "$file" "$RUNNER_TEMP/gap/imports.json" "$file"
+          module=${file#lean/}
+          module=${module%.lean}
+          module=${module//\//.}
+          cd lean
+          lake build "+$module"
