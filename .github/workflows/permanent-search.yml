@@ -3,6 +3,10 @@ name: Isolated permanent search
 on:
   push:
     branches: [codex/permanent-search]
+    paths:
+      - .github/workflows/permanent-search.yml
+      - tools/permanent-search/extend.py
+      - tools/permanent-search/grassmann.py
 
 permissions: {}
 
