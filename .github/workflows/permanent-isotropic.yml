@@ -1,0 +1,45 @@
+name: Isolated isotropic permanent search
+
+on:
+  push:
+    branches: [codex/permanent-search]
+    paths:
+      - .github/workflows/permanent-isotropic.yml
+      - tools/permanent-search/isotropic.py
+      - tools/permanent-search/extend.py
+
+permissions: {}
+
+concurrency:
+  group: isolated-isotropic-permanent-search
+  cancel-in-progress: true
+
+jobs:
+  search:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        start: [completing-cross, random-isotropic]
+    env:
+      SEARCH_CASE: ${{ matrix.start }}
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      - name: Fetch public search code without credentials
+        run: |
+          set -euo pipefail
+          git init -q .
+          git fetch --depth=1 https://github.com/Paureel/pequalnp-proofs.git "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Install pinned numerical libraries in the VM
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/permanent-venv"
+          "$RUNNER_TEMP/permanent-venv/bin/pip" install --disable-pip-version-check \
+            --only-binary=:all: numpy==2.2.6 scipy==1.15.3
+      - name: Search for candidate complex bases
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/permanent-venv/bin/python" -u tools/permanent-search/isotropic.py "$SEARCH_CASE"
