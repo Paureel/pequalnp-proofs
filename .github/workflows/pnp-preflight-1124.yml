@@ -1,0 +1,69 @@
+name: Isolated Lean preflight
+
+on:
+  push:
+    branches: [codex/preflight-1124]
+
+permissions: {}
+
+concurrency:
+  group: isolated-lean-preflight-1124
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BASE_COMMIT: 97f0bb34268ee5fa98ff26e132cfc627d13998f5
+      LAKE_ARTIFACT_CACHE: 'false'
+    steps:
+      - name: Fetch public source anonymously
+        run: |
+          set -euo pipefail
+          git init -q .
+          git fetch -q --depth=1 https://github.com/Paureel/pequalnp-proofs.git "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+          git fetch -q --depth=1 https://github.com/brilliant-hq/pequalnp-proofs.git "$BASE_COMMIT"
+      - name: Install checksum-verified elan and pinned Lean
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -q --proto '=https' --proto-redir '=https' -fsSL --max-time 120 \
+            https://github.com/leanprover/elan/releases/download/v4.4.0/elan-x86_64-unknown-linux-gnu.tar.gz \
+            -o elan.tar.gz
+          echo '0e8250aa2be86c7af929ade68db617af9edc8b9ccf6eaf5ece228250d0d032e2  elan.tar.gz' | sha256sum -c
+          tar -xzf elan.tar.gz elan-init
+          ./elan-init -y --no-modify-path --default-toolchain none
+          printf '%s\n' "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          cd "$GITHUB_WORKSPACE/lean"
+          "$HOME/.elan/bin/lean" --version
+      - name: Fetch pinned Mathlib artifacts
+        working-directory: lean
+        run: lake exe cache get
+      - name: Run the project's proof checker without GitHub credentials
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/gap"
+          mapfile -t files < <(git diff --name-only "$BASE_COMMIT" HEAD -- lean/PEqualNP/Outside/)
+          if [ "${#files[@]}" -eq 0 ]; then
+            file=lean/PEqualNP/Outside/PreflightSmoke.lean
+            printf 'import Mathlib\n\ntheorem PEqualNP.Outside.PreflightSmoke : (1 : ℕ) + 1 = 2 := by norm_num\n' > "$file"
+            printf '(1 : ℕ) + 1 = 2\n' > "$RUNNER_TEMP/gap/statement.txt"
+            kind=check
+          else
+            [ "${#files[@]}" -eq 1 ]
+            file=${files[0]}
+            [[ "$file" =~ ^lean/PEqualNP/Outside/L_[a-z0-9_]+\.lean$ ]]
+            [ -f "$file" ] && [ ! -L "$file" ]
+            curl -q --proto '=https' -fsS --max-time 20 --max-filesize 5000000 \
+              https://data.pequalnp.com/data/desk/gaps.json -o "$RUNNER_TEMP/gaps.json"
+            node .github/scripts/outside-guard.mjs gap-of-file "$RUNNER_TEMP/gaps.json" "$file" "$RUNNER_TEMP/gap"
+            node .github/scripts/outside-guard.mjs imports "$file" "$RUNNER_TEMP/gap/imports.json" "$file"
+            kind=$(cat "$RUNNER_TEMP/gap/gap.kind")
+          fi
+          node_bin=$(dirname "$(readlink -f "$(command -v node)")")
+          mkdir -p "$RUNNER_TEMP/queue"
+          env -i HOME="$HOME" LANG=C.UTF-8 PATH="$HOME/.elan/bin:$node_bin:/usr/bin:/bin" \
+            PEQUALNP_HOME="$RUNNER_TEMP/queue" LAKE_ARTIFACT_CACHE=false \
+            node tools/check-lean.mjs "$file" "$RUNNER_TEMP/gap/statement.txt" "$kind"
